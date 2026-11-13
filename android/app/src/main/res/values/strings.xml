@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Knock</string>
+    <string name="a11y_desc">Knock sends what is on your screen to your paired Mac when you tap the top of your phone on the MacBook notch. It looks at the screen only at that moment, uses on-screen text only to find the file name, and never stores or sends that text.</string>
+</resources>

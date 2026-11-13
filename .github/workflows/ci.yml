@@ -23,3 +23,19 @@ jobs:
       - name: Crypto vectors
         working-directory: mac
         run: swift run -c release KnockVectors ../protocol/reference/vectors.json
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Crypto vectors and build
+        working-directory: android
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: knock-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
