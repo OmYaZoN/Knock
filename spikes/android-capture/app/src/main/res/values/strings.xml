@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="a11y_desc">TapDrop Spike test: takes a screenshot only when you tap "Accessibility capture in 5 s" in the app, and logs the title of the app window on screen. Nothing leaves the phone.</string>
+</resources>
