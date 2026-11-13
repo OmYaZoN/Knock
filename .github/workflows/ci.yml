@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  protocol:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install cryptography
+      - run: python3 protocol/reference/knock_ref.py --selftest
+
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: mac
+        run: swift build -c release
+      - name: Crypto vectors
+        working-directory: mac
+        run: swift run -c release KnockVectors ../protocol/reference/vectors.json
