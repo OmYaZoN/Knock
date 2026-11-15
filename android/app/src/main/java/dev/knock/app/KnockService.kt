@@ -52,6 +52,14 @@ class KnockService : AccessibilityService(), SensorEventListener {
         @Volatile var proximityEvents = 0
         @Volatile var lastProximity = Float.NaN
         @Volatile var sensorInfo = "not started"
+        @Volatile var lightEvents = 0
+        @Volatile var lastLux = Float.NaN
+        @Volatile var lightInfo = "not started"
+
+        /** Lux at or below this counts as "pressed on something dark", like the Mac's own DARK_MAX. */
+        private const val LUX_DARK = 2f
+        /** The room must have been at least this bright just before, so a dark room never triggers. */
+        private const val LUX_LIT = 8f
         private const val CHUNK = 256 * 1024
 
         fun sentence(reason: Int) = when (reason) {
@@ -71,6 +79,9 @@ class KnockService : AccessibilityService(), SensorEventListener {
     private lateinit var sensors: SensorManager
     private var proximity: Sensor? = null
     private var wasNear = false
+    private var light: Sensor? = null
+    private var lastLitAt = 0L
+    private var darkSince = 0L
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, i: Intent) {
@@ -85,7 +96,9 @@ class KnockService : AccessibilityService(), SensorEventListener {
         val others = sensors.getSensorList(Sensor.TYPE_PROXIMITY).filter { it != proximity }.joinToString { it.name }
         sensorInfo = (proximity?.let { "${it.name} (${it.vendor}), max ${it.maximumRange}, wake-up ${it.isWakeUpSensor}" }
             ?: "none on this phone") + if (others.isEmpty()) "" else "\nNot used: $others"
-        debug("Service on. Proximity: $sensorInfo")
+        light = sensors.getDefaultSensor(Sensor.TYPE_LIGHT)
+        lightInfo = light?.let { "${it.name} (${it.vendor}), max ${it.maximumRange}" } ?: "none on this phone"
+        debug("Service on. Proximity: $sensorInfo. Light: $lightInfo")
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF)
         })
@@ -102,13 +115,38 @@ class KnockService : AccessibilityService(), SensorEventListener {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
     override fun onInterrupt() {}
 
-    // Trigger: proximity sensor goes near while the screen is on (the top of the phone touches the notch).
+    // Trigger, while the screen is on: the top of the phone touches the notch. Either the proximity
+    // sensor reports near, or the light sensor goes from a lit room to dark and stays dark for 300 ms.
+    // Samsung may hide its real proximity sensor from apps, so the light sensor is the fallback.
 
     private fun listen(on: Boolean) {
-        val p = proximity ?: return
-        debug("Proximity listening: $on")
-        if (on) sensors.registerListener(this, p, SensorManager.SENSOR_DELAY_GAME)
-        else { sensors.unregisterListener(this); wasNear = false }
+        debug("Sensors listening: $on")
+        if (on) {
+            proximity?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+            light?.let { sensors.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME) }
+        } else {
+            sensors.unregisterListener(this); wasNear = false; darkSince = 0L
+        }
+    }
+
+    private fun onLight(lux: Float) {
+        lightEvents++
+        lastLux = lux
+        if (busy) return // our own white/black overlay changes what an under-display sensor reads
+        val now = SystemClock.elapsedRealtime()
+        if (lux <= LUX_DARK) {
+            if (darkSince != 0L) return
+            darkSince = now
+            val litRecently = now - lastLitAt < 2000
+            debug("Light $lux lux -> DARK" + if (litRecently) "" else " (room wasn't lit, ignored)")
+            if (!litRecently) return
+            val mark = darkSince
+            main.postDelayed({ if (darkSince == mark) knock(fromButton = false) }, 300)
+        } else {
+            if (darkSince != 0L) debug("Light $lux lux -> lit")
+            darkSince = 0L
+            if (lux >= LUX_LIT) lastLitAt = now
+        }
     }
 
     /**
@@ -122,6 +160,7 @@ class KnockService : AccessibilityService(), SensorEventListener {
     }
 
     override fun onSensorChanged(e: SensorEvent) {
+        if (e.sensor.type == Sensor.TYPE_LIGHT) return onLight(e.values[0])
         val near = e.values[0] < minOf(e.sensor.maximumRange, 5f)
         proximityEvents++
         lastProximity = e.values[0]
