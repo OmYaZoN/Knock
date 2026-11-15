@@ -17,6 +17,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.os.VibrationEffect
+import android.util.Log
 import android.os.Vibrator
 import android.view.Choreographer
 import android.view.Display
@@ -48,6 +49,9 @@ import org.json.JSONObject
 class KnockService : AccessibilityService(), SensorEventListener {
     companion object {
         @Volatile var instance: KnockService? = null
+        @Volatile var proximityEvents = 0
+        @Volatile var lastProximity = Float.NaN
+        @Volatile var sensorInfo = "not started"
         private const val CHUNK = 256 * 1024
 
         fun sentence(reason: Int) = when (reason) {
@@ -78,6 +82,9 @@ class KnockService : AccessibilityService(), SensorEventListener {
         instance = this
         sensors = getSystemService(SensorManager::class.java)
         proximity = sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY)
+        sensorInfo = proximity?.let { "${it.name} (${it.vendor}), max ${it.maximumRange}, wake-up ${it.isWakeUpSensor}" }
+            ?: "none on this phone"
+        debug("Service on. Proximity: $sensorInfo")
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF)
         })
@@ -98,12 +105,16 @@ class KnockService : AccessibilityService(), SensorEventListener {
 
     private fun listen(on: Boolean) {
         val p = proximity ?: return
+        debug("Proximity listening: $on")
         if (on) sensors.registerListener(this, p, SensorManager.SENSOR_DELAY_GAME)
         else { sensors.unregisterListener(this); wasNear = false }
     }
 
     override fun onSensorChanged(e: SensorEvent) {
         val near = e.values[0] < minOf(e.sensor.maximumRange, 5f)
+        proximityEvents++
+        lastProximity = e.values[0]
+        debug("Proximity ${e.values[0]} -> ${if (near) "NEAR" else "far"}")
         if (near && !wasNear) knock(fromButton = false)
         wasNear = near
     }
@@ -116,17 +127,19 @@ class KnockService : AccessibilityService(), SensorEventListener {
     // The round
 
     private fun knock(fromButton: Boolean) {
-        if (busy || SystemClock.elapsedRealtime() - lastRound < 2000) return
+        if (busy) return debug("Knock skipped: a round is already running")
+        if (SystemClock.elapsedRealtime() - lastRound < 2000) return debug("Knock skipped: less than 2 s since the last one")
         if (Identity(this).mac == null) {
             if (fromButton) toast("Pair with your Mac first in the Knock app.")
-            return
+            return debug("Knock skipped: not paired")
         }
         val pkg = rootInActiveWindow?.packageName?.toString()
-        if (pkg == packageName && !fromButton) return
+        if (pkg == packageName && !fromButton) return debug("Knock skipped: the Knock app itself is open")
         if (pkg != packageName && SkipList.blocks(pkg)) {
             if (fromButton) toast("Knock never sends from this app.")
-            return
+            return debug("Knock skipped: app on the skip list ($pkg)")
         }
+        debug("Knock starting from $pkg")
         busy = true
         // §8: grab the screen once, now, before our own overlay covers it. Memory only.
         val texts = screenTexts()
@@ -140,6 +153,7 @@ class KnockService : AccessibilityService(), SensorEventListener {
 
             override fun onFailure(code: Int) {
                 busy = false
+                debug("Screenshot failed, code $code")
                 if (code == AccessibilityService.ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) toast("This app blocks screenshots, so Knock won't send from it.")
                 else if (fromButton) toast("Couldn't read the screen. Try again.")
             }
@@ -292,6 +306,12 @@ class KnockService : AccessibilityService(), SensorEventListener {
 
     private fun buzz() {
         getSystemService(Vibrator::class.java)?.vibrate(VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE))
+    }
+
+    /** Logs to logcat (tag Knock) and, with trigger debug on in the app, shows a toast. Never logs screen text. */
+    private fun debug(s: String) {
+        Log.i("Knock", s)
+        if (getSharedPreferences("knock", MODE_PRIVATE).getBoolean("debug", false)) toast(s)
     }
 
     private fun toast(s: String) = main.post { Toast.makeText(this, s, Toast.LENGTH_LONG).show() }

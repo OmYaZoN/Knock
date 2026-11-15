@@ -45,6 +45,14 @@ class MainActivity : Activity() {
             if (s == null) say("Turn on Knock in Accessibility first.")
             else { s.knockLater(5000); say("Open your file and hold the top of the phone on the notch.") }
         }
+        val prefs = getSharedPreferences("knock", MODE_PRIVATE)
+        fun debugLabel() = "Trigger debug: " + if (prefs.getBoolean("debug", false)) "ON" else "OFF"
+        button(debugLabel()) {}.apply {
+            setOnClickListener {
+                prefs.edit().putBoolean("debug", !prefs.getBoolean("debug", false)).apply()
+                text = debugLabel()
+            }
+        }
         button("Forget paired Mac") { Identity(this).forgetMac(); refresh() }
 
         col.addView(TextView(this).apply {
@@ -68,6 +76,9 @@ class MainActivity : Activity() {
             (if (a11y) "✓" else "✗") + " Accessibility " + if (a11y) "on" else "off",
             (if (files) "✓" else "✗") + " All-files access " + if (files) "on" else "off (screenshots only)",
             if (mac != null) "✓ Paired with ${mac.name}" else "✗ Not paired",
+            "",
+            "Proximity sensor: ${KnockService.sensorInfo}",
+            "Events received: ${KnockService.proximityEvents}, last value ${KnockService.lastProximity}",
         ).joinToString("\n")
     }
 
