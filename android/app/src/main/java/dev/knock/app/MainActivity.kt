@@ -79,6 +79,8 @@ class MainActivity : Activity() {
             "",
             "Proximity sensor: ${KnockService.sensorInfo}",
             "Events received: ${KnockService.proximityEvents}, last value ${KnockService.lastProximity}",
+            "Light sensor: ${KnockService.lightInfo}",
+            "Light events: ${KnockService.lightEvents}, last ${KnockService.lastLux} lux",
         ).joinToString("\n")
     }
 
