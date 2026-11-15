@@ -81,9 +81,10 @@ class KnockService : AccessibilityService(), SensorEventListener {
     override fun onServiceConnected() {
         instance = this
         sensors = getSystemService(SensorManager::class.java)
-        proximity = sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY)
-        sensorInfo = proximity?.let { "${it.name} (${it.vendor}), max ${it.maximumRange}, wake-up ${it.isWakeUpSensor}" }
-            ?: "none on this phone"
+        proximity = pickProximity(sensors)
+        val others = sensors.getSensorList(Sensor.TYPE_PROXIMITY).filter { it != proximity }.joinToString { it.name }
+        sensorInfo = (proximity?.let { "${it.name} (${it.vendor}), max ${it.maximumRange}, wake-up ${it.isWakeUpSensor}" }
+            ?: "none on this phone") + if (others.isEmpty()) "" else "\nNot used: $others"
         debug("Service on. Proximity: $sensorInfo")
         registerReceiver(screenReceiver, IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF)
@@ -108,6 +109,16 @@ class KnockService : AccessibilityService(), SensorEventListener {
         debug("Proximity listening: $on")
         if (on) sensors.registerListener(this, p, SensorManager.SENSOR_DELAY_GAME)
         else { sensors.unregisterListener(this); wasNear = false }
+    }
+
+    /**
+     * Samsung lists several TYPE_PROXIMITY sensors, and the default one on a Galaxy S23 is the
+     * "Palm Proximity Sensor" for palm gestures, which never reports the notch. Prefer the real one.
+     */
+    private fun pickProximity(sm: SensorManager): Sensor? {
+        val all = sm.getSensorList(Sensor.TYPE_PROXIMITY)
+        val real = all.filterNot { it.name.contains("palm", ignoreCase = true) }
+        return real.firstOrNull { it.isWakeUpSensor } ?: real.firstOrNull() ?: sm.getDefaultSensor(Sensor.TYPE_PROXIMITY)
     }
 
     override fun onSensorChanged(e: SensorEvent) {
